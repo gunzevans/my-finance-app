@@ -38,51 +38,52 @@ export async function depositFunds(formData) {
 // 2. AUTOMATED PAYCHECK ROUTING 
 // ---------------------------------------------------------
 export async function processRoutedPaycheck(formData) {
+  console.log("--- INITIATING PAYCHECK ROUTING ---")
   const amount = parseFloat(formData.get('amount'))
+  console.log("Entered Amount:", amount)
+  
   if (!amount) return
 
-  // 1. Map your Supabase database IDs to your USAA accounts
   const accountIds = {
-    main: 1,      // USAA - Dan's Checking
-    hoa: 2,       // USAA - Next Payday & HOA dues
-    utilities: 3, // USAA - Utilities & Mortgage
-    joint: 4,     // USAA - Joint Checking
-    savings: 5,   // USAA - Vacation/Savings
-    hanna: 6,     // USAA - Emma
-    emma: 7,      // USAA - Hanna
-    MissionFed: 8 // MISSION FED - Play Checking
+    main: 1,      
+    hoa: 2,       
+    utilities: 3, 
+    joint: 4,     
+    savings: 5,   
+    hanna: 6,     
+    emma: 7,      
+    MissionFed: 8 
   }
 
-  // 2. Define the fixed transfers per paycheck
-  // Adjust these amounts to match your bi-weekly forecast targets
   const transfers = {
-    hoa: 35.00,          // HOA
-    utilities: 2150.00,  // Mortgage, Evergy, Atmos, WaterOne, GFiber, etc.
-    joint: 80.00,        // Health, Life Ins.
-    savings: 50.00,      // Emergency, Vacation, Vehicle Reg, Maint
-    hanna: 25.00,        // Hanna's expenses
-    emma: 25.00,         // Emma's expenses
-    MissionFed: 200      // MISSION FED - Play Checking
+    hoa: 35.00,          
+    utilities: 2150.00,  
+    joint: 80.00,        
+    savings: 50.00,      
+    hanna: 25.00,        
+    emma: 25.00,         
+    MissionFed: 200      
   }
 
-  // Calculate the leftover un-routed cash
   const totalTransfers = Object.values(transfers).reduce((sum, val) => sum + val, 0)
   const remainingInMain = amount - totalTransfers
 
-  // 3. Fetch current balances for ALL involved accounts at once
   const idsArray = Object.values(accountIds)
   const { data: dbAccounts, error: fetchError } = await supabase
     .from('accounts')
     .select('id, current_cleared_balance')
     .in('id', idsArray)
 
-  if (fetchError) throw new Error(fetchError.message)
+  if (fetchError) {
+    console.error("FAILED TO FETCH ACCOUNTS:", fetchError.message)
+    return
+  }
 
-  // Map the fetched balances for easy math
   const balances = {}
   dbAccounts.forEach(acc => { balances[acc.id] = parseFloat(acc.current_cleared_balance) })
+  
+  console.log("Current Balances Found:", balances)
 
-  // 4. Prepare bulk balance updates
   const updatedBalances = [
     { id: accountIds.main, current_cleared_balance: balances[accountIds.main] + remainingInMain },
     { id: accountIds.hoa, current_cleared_balance: balances[accountIds.hoa] + transfers.hoa },
@@ -94,18 +95,26 @@ export async function processRoutedPaycheck(formData) {
     { id: accountIds.MissionFed, current_cleared_balance: balances[accountIds.MissionFed] + transfers.MissionFed }
   ]
 
-  // Upsert the new balances to Supabase
-  await supabase.from('accounts').upsert(updatedBalances)
+  console.log("Attempting to push these new balances:", updatedBalances)
 
-  // 5. Write the detailed receipts to the Ledger
+  // Safely update each account's balance one at a time
+  for (const acc of updatedBalances) {
+    const { error: updateError } = await supabase
+      .from('accounts')
+      .update({ current_cleared_balance: acc.current_cleared_balance })
+      .eq('id', acc.id)
+
+    if (updateError) {
+      console.error(`FAILED TO UPDATE ACCOUNT ${acc.id}:`, updateError.message)
+      return
+    }
+  }
+
   const today = new Date().toISOString().split('T')[0]
-  
-  // Start with the initial full deposit into Dan's Checking
   const ledgerEntries = [
     { transaction_date: today, amount: amount, destination_account_id: accountIds.main, status: 'CLEARED' }
   ]
 
-  // Automatically generate the outgoing transfer logs
   for (const [key, transferAmount] of Object.entries(transfers)) {
     if (transferAmount > 0) {
       ledgerEntries.push({
@@ -118,13 +127,17 @@ export async function processRoutedPaycheck(formData) {
     }
   }
 
-  // Insert all ledger records simultaneously
-  await supabase.from('ledger').insert(ledgerEntries)
+  const { error: ledgerError } = await supabase.from('ledger').insert(ledgerEntries)
+  
+  if (ledgerError) {
+    console.error("SUPABASE REJECTED THE LEDGER ENTRIES:", ledgerError.message)
+    return
+  }
 
-  // Refresh the dashboard UI
+  console.log("--- ROUTING COMPLETELY SUCCESSFUL ---")
+  
   revalidatePath('/')
 }
-
 // ---------------------------------------------------------
 // 3. PAY AN EXPENSE
 // ---------------------------------------------------------
