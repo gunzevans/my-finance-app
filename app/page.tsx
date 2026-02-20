@@ -2,10 +2,17 @@ import { supabase } from '../utils/supabase'
 import { depositFunds, processRoutedPaycheck } from './actions'
 
 export default async function Home() {
-  // Fetch all accounts from Supabase to display in the grid and dropdown
-  const { data: accounts, error } = await supabase
+  // Fetch accounts
+  const { data: accounts } = await supabase
     .from('accounts')
     .select('*')
+    .order('id', { ascending: true })
+
+  // Fetch active bills
+  const { data: bills } = await supabase
+    .from('bills')
+    .select('*')
+    .eq('is_active', true)
     .order('id', { ascending: true })
 
   if (error) {
@@ -56,6 +63,37 @@ export default async function Home() {
               Execute Routing
             </button>
           </form>
+        </div>
+        {/* PENDING BILLS CHECKLIST */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8 border-l-4 border-l-red-500">
+          <h2 className="text-xl font-semibold mb-4 text-red-800">Pending Bills</h2>
+          <div className="flex flex-col gap-3">
+            {bills?.map((bill) => {
+              // Find the account name that is supposed to pay this bill
+              const payingAccount = accounts?.find(acc => acc.id === bill.paying_account_id)
+              
+              return (
+                <div key={bill.id} className="flex justify-between items-center p-3 border border-gray-100 rounded bg-gray-50">
+                  <div>
+                    <p className="font-medium text-gray-800">{bill.bill_name}</p>
+                    <p className="text-sm text-gray-500">
+                      Expected: ${bill.expected_amount} • From: {payingAccount?.account_name || 'Unassigned'}
+                    </p>
+                  </div>
+                  
+                  {/* The Quick-Pay Button */}
+                  <form action={payExpense} className="flex items-center gap-2">
+                    <input type="hidden" name="expenseName" value={bill.bill_name} />
+                    <input type="hidden" name="accountId" value={bill.paying_account_id} />
+                    <input type="hidden" name="amount" value={bill.expected_amount} />
+                    <button type="submit" className="bg-red-100 text-red-700 px-4 py-1.5 rounded text-sm font-semibold hover:bg-red-200 transition">
+                      Pay Exact Amount
+                    </button>
+                  </form>
+                </div>
+              )
+            })}
+          </div>
         </div>
         
         {/* ACCOUNT BALANCES GRID */}
