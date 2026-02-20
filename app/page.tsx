@@ -1,23 +1,24 @@
 import { supabase } from '../utils/supabase'
-import { depositFunds, processRoutedPaycheck } from './actions'
+import { depositFunds, processRoutedPaycheck, payExpense } from './actions'
 
 export default async function Home() {
-  // Fetch accounts
-  const { data: accounts } = await supabase
+  // 1. Fetch all accounts from Supabase
+  const { data: accounts, error: accountsError } = await supabase
     .from('accounts')
     .select('*')
     .order('id', { ascending: true })
 
-  // Fetch active bills
-  const { data: bills } = await supabase
+  // 2. Fetch active bills from Supabase
+  const { data: bills, error: billsError } = await supabase
     .from('bills')
     .select('*')
     .eq('is_active', true)
     .order('id', { ascending: true })
 
-  if (error) {
-    console.error('Error fetching accounts:', error.message)
-    return <div className="p-8 text-red-500">Failed to load accounts.</div>
+  // Handle any database connection errors smoothly
+  if (accountsError || billsError) {
+    console.error('Data fetch error:', accountsError?.message || billsError?.message)
+    return <div className="p-8 text-red-500">Failed to load dashboard data. Please check your database connection.</div>
   }
 
   return (
@@ -52,7 +53,7 @@ export default async function Home() {
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8 border-l-4 border-l-blue-500">
           <h2 className="text-xl font-semibold mb-4 text-blue-800">Process Paycheck Routing</h2>
           <p className="text-sm text-gray-600 mb-4">
-            Automatically distributes funds to Utilities, HOA, and Savings based on routing rules.
+            Automatically distributes funds to Utilities, HOA, Joint, Savings, and sub-accounts based on routing rules.
           </p>
           <form action={processRoutedPaycheck} className="flex gap-4 items-end">
             <div className="flex-1">
@@ -64,7 +65,8 @@ export default async function Home() {
             </button>
           </form>
         </div>
-        {/* PENDING BILLS CHECKLIST */}
+
+        {/* MODULE 3: PENDING BILLS CHECKLIST */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8 border-l-4 border-l-red-500">
           <h2 className="text-xl font-semibold mb-4 text-red-800">Pending Bills</h2>
           <div className="flex flex-col gap-3">
@@ -93,10 +95,15 @@ export default async function Home() {
                 </div>
               )
             })}
+            
+            {bills?.length === 0 && (
+              <p className="text-gray-500 italic">No pending bills found in the database.</p>
+            )}
           </div>
         </div>
         
-        {/* ACCOUNT BALANCES GRID */}
+        {/* MODULE 4: ACCOUNT BALANCES GRID */}
+        <h2 className="text-xl font-semibold mb-4 text-gray-800">Current Balances</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {accounts?.map((account) => (
             <div key={account.id} className="bg-white border border-gray-200 p-6 rounded-lg shadow-sm">
