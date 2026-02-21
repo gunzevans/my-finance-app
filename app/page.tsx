@@ -1,6 +1,8 @@
 import { supabase } from '../utils/supabase'
-import { depositFunds, processRoutedPaycheck, payExpense } from './actions'
+import { depositFunds, processRoutedPaycheck, payExpense, resetMonthlyBills } from './actions'
+import Link from 'next/link'
 
+// Helper for date suffixes (1st, 2nd, 3rd...)
 function getOrdinalSuffix(day: number) {
   if (!day) return ''
   if (day > 3 && day < 21) return 'th'
@@ -13,24 +15,11 @@ function getOrdinalSuffix(day: number) {
 }
 
 export default async function Home() {
-  const { data: accounts } = await supabase
-    .from('accounts')
-    .select('*')
-    .order('id', { ascending: true })
+  // Fetch data from Supabase
+  const { data: accounts } = await supabase.from('accounts').select('*').order('id', { ascending: true })
+  const { data: bills } = await supabase.from('bills').select('*').eq('is_active', true).order('due_day_of_month', { ascending: true })
 
-  const { data: bills } = await supabase
-    .from('bills')
-    .select('*')
-    .eq('is_active', true)
-    .order('id', { ascending: true })
-
-  const { data: ledger } = await supabase
-    .from('ledger')
-    .select('*')
-    .order('id', { ascending: false })
-    .limit(15)
-
-  // --- FORECAST CALCULATIONS ---
+  // Calculate Header Stats
   const dansChecking = accounts?.find(a => a.id === 1)?.current_cleared_balance || 0
   const totalPendingBills = bills?.reduce((sum, bill) => sum + (bill.expected_amount || 0), 0) || 0
   const safeToSpend = dansChecking - totalPendingBills
@@ -38,141 +27,159 @@ export default async function Home() {
   return (
     <main className="min-h-screen p-4 md:p-8 bg-gray-50 text-gray-900 font-sans">
       <div className="max-w-6xl mx-auto">
-        <header className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl md:text-3xl font-bold italic tracking-tight text-gray-800">DAN'S ROUTING ENGINE</h1>
-          <div className="text-right">
-             <p className="text-xs uppercase tracking-widest text-gray-500 font-bold">Status</p>
-             <p className="text-sm font-mono text-green-600">● LIVE_SYSTEM_ACTIVE</p>
-          </div>
+        
+        {/* HEADER */}
+        <header className="flex justify-between items-center mb-6">
+          <h1 className="text-xl font-black italic tracking-tighter text-gray-800 underline decoration-blue-500 underline-offset-4">
+            GUNZ_ROUTING_V2
+          </h1>
+          <Link href="/ledger" className="bg-gray-200 text-gray-600 px-4 py-2 rounded-lg text-xs font-bold uppercase hover:bg-gray-300 transition">
+            View Ledger
+          </Link>
         </header>
 
-        {/* NEW: PAYDAY FORECAST MODULE */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white p-6 rounded-xl shadow-sm border-t-4 border-t-gray-800 border border-gray-200">
-            <p className="text-sm font-semibold text-gray-500 uppercase">Current Checking</p>
-            <p className="text-3xl font-bold">${dansChecking.toLocaleString()}</p>
+        {/* TOP STATS BOXES */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Checking Balance</p>
+            <p className="text-2xl font-black text-center">${dansChecking.toLocaleString()}</p>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border-t-4 border-t-red-500 border border-gray-200">
-            <p className="text-sm font-semibold text-gray-500 uppercase">Total Pending Bills</p>
-            <p className="text-3xl font-bold text-red-600">-${totalPendingBills.toLocaleString()}</p>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Bills Remaining</p>
+            <p className="text-2xl font-black text-red-500 text-center">-${totalPendingBills.toLocaleString()}</p>
           </div>
-          <div className={`bg-white p-6 rounded-xl shadow-sm border-t-4 border border-gray-200 ${safeToSpend >= 0 ? 'border-t-green-500' : 'border-t-orange-600'}`}>
-            <p className="text-sm font-semibold text-gray-500 uppercase">Safe-To-Spend Cash</p>
-            <p className={`text-3xl font-bold ${safeToSpend >= 0 ? 'text-green-600' : 'text-orange-600'}`}>
+          <div className={`bg-white p-4 rounded-xl shadow-sm border-2 text-center ${safeToSpend >= 0 ? 'border-green-500' : 'border-orange-500'}`}>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Safe-To-Spend</p>
+            <p className={`text-2xl font-black ${safeToSpend >= 0 ? 'text-green-600' : 'text-orange-600'}`}>
               ${safeToSpend.toLocaleString()}
             </p>
           </div>
         </div>
 
-        {/* AUTOMATED PAYCHECK ROUTING */}
-        <div className="bg-blue-600 p-6 rounded-xl shadow-lg mb-8 text-white">
-          <h2 className="text-xl font-bold mb-2">Process New Paycheck</h2>
-          <form action={processRoutedPaycheck} className="flex flex-col md:flex-row gap-4 items-end">
-            <div className="flex-1 w-full">
+        {/* TWO-STEP PAYROLL PROCESS */}
+        <div className="bg-gray-900 p-6 rounded-2xl shadow-xl mb-8 text-white border-l-8 border-blue-500">
+          <h2 className="text-sm font-black uppercase tracking-widest mb-4 text-blue-400">Payroll Processing</h2>
+          
+          <div className="space-y-6">
+            {/* STEP 1: DEPOSIT */}
+            <form action={depositFunds} className="flex gap-2">
+              <input type="hidden" name="accountId" value="1" /> 
               <input 
                 type="number" 
                 name="amount" 
                 step="0.01" 
-                placeholder="Enter Net Pay Amount..." 
-                className="w-full bg-blue-700 border-none rounded-lg p-3 text-white placeholder-blue-300 font-bold text-xl focus:ring-2 focus:ring-white outline-none" 
+                placeholder="Enter Check Amount..." 
+                className="flex-1 bg-gray-800 border-none rounded-lg p-3 text-white font-bold outline-none placeholder-gray-500" 
                 required 
               />
-            </div>
-            <button type="submit" className="w-full md:w-auto bg-white text-blue-600 px-8 py-3 rounded-lg font-black uppercase tracking-tight hover:bg-gray-100 transition shadow-md">
-              Execute Routing
-            </button>
-          </form>
-        </div>
+              <button type="submit" className="bg-green-600 text-white px-4 md:px-6 py-3 rounded-lg font-black uppercase text-[10px] md:text-xs hover:bg-green-500 transition shadow-md">
+                1. Deposit Check
+              </button>
+            </form>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* PENDING BILLS */}
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-6 bg-red-500 rounded-full"></span> 
-              Bill Checklist
-            </h2>
-            <div className="space-y-3">
-              {bills?.map((bill) => {
-                const payingAccount = accounts?.find(acc => acc.id === bill.paying_account_id)
-                const dueDateText = bill.due_day_of_month 
-                  ? `Due the ${bill.due_day_of_month}${getOrdinalSuffix(bill.due_day_of_month)}` 
-                  : ''
-                
-                return (
-                  <div key={bill.id} className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-xl hover:border-red-300 transition group shadow-sm">
-                    <div>
-                      <p className="font-bold text-gray-800 uppercase text-sm tracking-tight">{bill.bill_name}</p>
-                      <p className="text-xs text-gray-500 font-medium italic">
-                        {payingAccount?.account_name} • <span className="text-red-500 font-bold">{dueDateText}</span>
-                      </p>
-                    </div>
-                    <form action={payExpense} className="flex items-center gap-4">
-                      <p className="font-black text-gray-900">${bill.expected_amount}</p>
-                      <input type="hidden" name="expenseName" value={bill.bill_name} />
-                      <input type="hidden" name="accountId" value={bill.paying_account_id} />
-                      <input type="hidden" name="amount" value={bill.expected_amount} />
-                      <button type="submit" className="bg-gray-100 text-gray-400 p-2 rounded-full group-hover:bg-red-500 group-hover:text-white transition">
-                        ✓
-                      </button>
-                    </form>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
+            <div className="h-px bg-gray-800 w-full"></div>
 
-          {/* ACCOUNT BALANCES */}
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-6 bg-green-500 rounded-full"></span> 
-              Vault Balances
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {accounts?.map((account) => (
-                <div key={account.id} className="bg-white border border-gray-200 p-4 rounded-xl shadow-sm">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-tighter">{account.account_name}</p>
-                  <p className="text-xl font-black text-gray-800">${account.current_cleared_balance.toLocaleString()}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        {/* LEDGER */}
-        <section className="mt-12">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <span className="w-2 h-6 bg-gray-400 rounded-full"></span> 
-            System Ledger
-          </h2>
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-100">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase">Date</th>
-                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase">Amount</th>
-                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase">Source</th>
-                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase">Destination</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {ledger?.map((tx) => {
-                  const sourceAcc = accounts?.find(a => a.id === tx.source_account_id)
-                  const destAcc = accounts?.find(a => a.id === tx.destination_account_id)
-                  return (
-                    <tr key={tx.id} className="hover:bg-gray-50 transition">
-                      <td className="px-6 py-4 whitespace-nowrap text-xs font-medium text-gray-500">{new Date(tx.transaction_date).toLocaleDateString()}</td>
-                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-black ${tx.amount < 0 ? "text-red-500" : "text-green-600"}`}>
-                        {tx.amount < 0 ? '-' : '+'}${Math.abs(tx.amount).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-400 font-bold uppercase tracking-tighter">{sourceAcc?.account_name || 'EXTERNAL'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-400 font-bold uppercase tracking-tighter">{destAcc?.account_name || 'SPENT'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+            {/* STEP 2: DISTRIBUTE */}
+            <form action={processRoutedPaycheck}>
+              <p className="text-[10px] font-black text-gray-500 uppercase mb-2 tracking-widest">Select Distribution Rule:</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                {[
+                  { id: '1st_month', label: '1st: Ret/VA' },
+                  { id: 'op_1', label: '1st OP Check' },
+                  { id: 'op_2', label: '2nd OP Check' },
+                  { id: 'op_3', label: '3rd OP Check' }
+                ].map((type) => (
+                  <label key={type.id} className="relative flex flex-col items-center justify-center p-3 border border-gray-700 rounded-xl cursor-pointer hover:bg-gray-800 transition has-[:checked]:bg-blue-600 has-[:checked]:border-blue-400">
+                    <input type="radio" name="payType" value={type.id} className="absolute opacity-0" required />
+                    <span className="text-[10px] font-bold text-center uppercase leading-tight">{type.label}</span>
+                  </label>
+                ))}
+              </div>
+              <button type="submit" className="w-full bg-blue-500 text-white py-3 rounded-lg font-black uppercase text-xs hover:bg-blue-400 transition shadow-lg">
+                2. Execute Distribution Rules
+              </button>
+            </form>
           </div>
-        </section>
+        </div>
+
+        {/* MAIN DASHBOARD CONTENT */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+           
+           {/* BILL CHECKLIST */}
+           <section>
+             <div className="flex justify-between items-center mb-3">
+               <h2 className="text-sm font-black uppercase tracking-widest text-gray-400">
+                 Monthly Bills <span className="text-red-500 ml-2">({bills?.length || 0})</span>
+               </h2>
+               <form action={resetMonthlyBills}>
+                 <button type="submit" className="text-[9px] bg-gray-200 text-gray-500 px-3 py-1 rounded-md font-black uppercase hover:bg-red-500 hover:text-white transition">
+                   Reset for New Month
+                 </button>
+               </form>
+             </div>
+             
+             <div className="space-y-2">
+               {bills?.map((bill) => {
+                  const source = accounts?.find(a => a.id === bill.paying_account_id);
+                  return (
+                    <div key={bill.id} className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-blue-300 transition group">
+                      <div>
+                        <p className="text-sm font-black text-gray-800 uppercase tracking-tight">{bill.bill_name}</p>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">
+                          From: {source?.account_name} • Due: {bill.due_day_of_month}{getOrdinalSuffix(bill.due_day_of_month || 0)}
+                        </p>
+                      </div>
+                      <form action={payExpense} className="flex items-center gap-4">
+                        <span className="text-sm font-black text-gray-900">${bill.expected_amount}</span>
+                        <input type="hidden" name="billId" value={bill.id} />
+                        <input type="hidden" name="accountId" value={bill.paying_account_id} />
+                        <input type="hidden" name="amount" value={bill.expected_amount} />
+                        <button type="submit" className="w-8 h-8 rounded-full border-2 border-gray-100 flex items-center justify-center text-gray-200 group-hover:border-green-500 group-hover:text-green-500 transition hover:bg-green-500 hover:text-white font-bold">✓</button>
+                      </form>
+                    </div>
+                  );
+               })}
+               {(!bills || bills.length === 0) && (
+                 <div className="p-8 bg-gray-100 border-2 border-dashed border-gray-200 rounded-xl text-center">
+                   <p className="text-gray-400 text-xs font-bold uppercase italic">All bills cleared for this month.</p>
+                 </div>
+               )}
+             </div>
+           </section>
+
+           {/* VAULTS / ACCOUNTS */}
+           <section>
+             <h2 className="text-sm font-black uppercase tracking-widest text-gray-400 mb-3 text-right">Account Vaults</h2>
+             <div className="grid grid-cols-1 gap-2">
+               {accounts?.map((acc) => (
+                 <div key={acc.id} className="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">{acc.account_name}</p>
+                   <p className="text-sm font-black text-gray-800">${acc.current_cleared_balance.toLocaleString()}</p>
+                 </div>
+               ))}
+             </div>
+
+             {/* MANUAL ADJUSTMENT TOOL */}
+             <div className="mt-6 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+               <details className="cursor-pointer group">
+                 <summary className="text-[10px] font-black text-gray-400 uppercase tracking-widest list-none flex justify-between items-center">
+                   <span>Manual Calibration</span>
+                   <span className="text-gray-300 group-open:rotate-180 transition-transform">▼</span>
+                 </summary>
+                 <form action={depositFunds} className="flex flex-col gap-3 mt-4">
+                   <select name="accountId" className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-[10px] font-black uppercase" required>
+                     <option value="">-- Choose Vault --</option>
+                     {accounts?.map(acc => <option key={acc.id} value={acc.id}>{acc.account_name}</option>)}
+                   </select>
+                   <div className="flex gap-2">
+                     <input type="number" name="amount" step="0.01" placeholder="Amount..." className="flex-1 bg-gray-50 border border-gray-200 rounded p-2 text-sm" required />
+                     <button type="submit" className="bg-gray-800 text-white px-4 py-2 rounded text-[10px] font-black uppercase hover:bg-black transition">Set Balance</button>
+                   </div>
+                 </form>
+               </details>
+             </div>
+           </section>
+        </div>
       </div>
     </main>
   )
